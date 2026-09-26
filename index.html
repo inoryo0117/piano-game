@@ -74,6 +74,8 @@
   .levelfill { height:100%; width:0%; background:linear-gradient(90deg,#4ce6ff,#7fffc0); }
   .detectname { font-size:34px; font-weight:800; margin:14px 0 4px; color:#4ce6ff; min-height:44px; }
   .hint { color:#89aabb; font-size:13px; line-height:1.6; }
+  .hint.warn { color:#ffb84c; font-weight:600; }
+  .micdiag { color:#4a6577; font-size:11px; font-family:monospace; margin-top:6px; }
   .freekeys { margin-top:18px; }
 
   /* ---- 自由演奏 ---- */
@@ -178,7 +180,9 @@
     <div class="micbox">
       <p class="hint" id="micStatus">マイクを使う許可を押してください。</p>
       <button class="bigbtn" id="micAllowBtn">マイクを許可する</button>
+      <p class="hint warn" id="micSilenceWarn" style="display:none">マイクの音が届いていません。もう一度ボタンを押してください。</p>
       <div class="levelmeter"><div class="levelfill" id="levelFill"></div></div>
+      <div class="micdiag" id="micDiag"></div>
       <p class="hint">「ドを弾いてみて」→ 検出した音名がここに出ます</p>
       <div class="detectname" id="detectName">-</div>
       <div class="freekeys">
@@ -356,9 +360,34 @@ els.toMicBtn.addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 let micTimeData = null;
 let freeLoopId = null;
+let micSetupTime = 0;
+let micHeardSound = false;
+
+// iOS/iPadOS の Safari 対策：AudioContext はユーザー操作の同期区間の先頭で作って resume する
+// （await の後で作ると suspended のまま動かないことがある）。グラフは destination まで
+// つなぐ（gain 0 の GainNode 経由）。つながっていないと AnalyserNode に何も流れないことがある。
+function ensureAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+
+// 何か操作されるたびに、AudioContext が running でなければ resume を再試行する（次のタップで復帰）。
+document.addEventListener('click', () => {
+  if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+});
+
+function teardownMic() {
+  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); }
+  micStream = null;
+  analyser = null;
+  if (audioCtx) { audioCtx.close().catch(() => {}); }
+  audioCtx = null;
+}
 
 async function setupMic() {
   if (demoMode) { els.micStatus.textContent = 'デモモード：マイク不要で自動演奏します。'; return true; }
+  ensureAudioCtx(); // 同期区間の先頭で作成・resume
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -367,17 +396,25 @@ async function setupMic() {
     els.micStatus.textContent = 'マイクの許可が得られませんでした：' + e.message;
     return false;
   }
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   const src = audioCtx.createMediaStreamSource(micStream);
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 4096;
+  const silentGain = audioCtx.createGain();
+  silentGain.gain.value = 0;
   src.connect(analyser);
+  analyser.connect(silentGain);
+  silentGain.connect(audioCtx.destination);
   micTimeData = new Float32Array(analyser.fftSize);
+  await audioCtx.resume().catch(() => {});
   els.micStatus.textContent = 'マイクOK。「ド」を弾いてみてください。';
+  if (els.micSilenceWarn) els.micSilenceWarn.style.display = 'none';
+  micSetupTime = performance.now();
+  micHeardSound = false;
   return true;
 }
 
 els.micAllowBtn.addEventListener('click', async () => {
+  teardownMic();
   const ok = await setupMic();
   if (ok) startMicMeterLoop();
 });
@@ -394,10 +431,19 @@ function startMicMeterLoop() {
     let sum = 0;
     for (let i = 0; i < micTimeData.length; i++) sum += micTimeData[i] * micTimeData[i];
     const rms = Math.sqrt(sum / micTimeData.length);
+    if (rms > 0) micHeardSound = true;
     els.levelFill.style.width = Math.min(100, rms * 400) + '%';
     const spec = computeSpectrum(micTimeData, audioCtx.sampleRate);
     const top = detectFree(spec, { topN: 1, minDb: 6 });
     els.detectName.textContent = top.length ? midiName(top[0].midi) : '-';
+    if (els.micDiag) {
+      const db = 20 * Math.log10(rms + 1e-9);
+      els.micDiag.textContent = `状態: ${audioCtx.state} / ${audioCtx.sampleRate}Hz / レベル ${db.toFixed(0)}dB`;
+    }
+    if (els.micSilenceWarn) {
+      const silent = !micHeardSound && performance.now() - micSetupTime > 3000;
+      els.micSilenceWarn.style.display = silent ? '' : 'none';
+    }
     if (document.getElementById('screen-mic').classList.contains('active')) requestAnimationFrame(loop);
   }
   loop();
@@ -667,8 +713,12 @@ els.pauseBtn.addEventListener('click', () => {
   paused = true;
   els.pauseMenu.classList.add('show');
 });
-els.resumeBtn.addEventListener('click', () => {
+els.resumeBtn.addEventListener('click', async () => {
   if (!paused) return;
+  if (!demoMode && !analyser) {
+    const ok = await setupMic();
+    if (!ok) return;
+  }
   paused = false;
   els.pauseMenu.classList.remove('show');
   lastFrameTime = performance.now();
@@ -763,6 +813,19 @@ if ('wakeLock' in navigator) {
   });
   navigator.wakeLock.request('screen').catch(() => {});
 }
+
+// 最小化・バックグラウンドではマイクを止める（ステータスバーのマイク使用中表示を消す）。
+// 復帰時は自動で取り直さず、各画面のボタン（マイクを許可する／自由演奏モードへ／つづける）を
+// 押したときに setupMic() でストリームと AudioContext を作り直す。
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (document.getElementById('screen-play').classList.contains('active') && !paused) {
+      paused = true;
+      els.pauseMenu.classList.add('show');
+    }
+    teardownMic();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // オープニング（縦・横どちらでも成立する起動画面。タップで曲選びへ）
