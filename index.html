@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ピアノ音ゲー">
+<meta name="apple-mobile-web-app-title" content="おとふる">
 <meta name="theme-color" content="#050b12">
-<title>ピアノ音ゲー</title>
+<title>おとふる</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; background:#050b12; }
@@ -103,15 +103,37 @@
   .pausebox { background:#0c1620; border:1px solid rgba(150,200,230,.25); border-radius:16px; padding:22px 26px;
     text-align:center; }
   .pausebox .bigbtn { margin-top:10px; }
+
+  /* ---- オープニング ---- */
+  #screen-opening { position:fixed; inset:0; z-index:10000; background:#050b12;
+    display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  #screen-opening.hide { display:none; }
+  #openingCanvas { position:absolute; inset:0; width:100%; height:100%; }
+  .openingLogoWrap { position:relative; z-index:1; display:flex; flex-direction:column;
+    align-items:center; gap:5vh; pointer-events:none;
+    padding-bottom:20vh; /* 下端の鍵盤に重ならないよう少し上へ */
+  }
+  .openingLogo { font-size:min(17vw, 15vh, 96px); font-weight:900; letter-spacing:.08em;
+    color:#eaf6fb; text-shadow:0 0 18px rgba(76,230,255,.6), 0 0 40px rgba(255,157,76,.35); }
+  .openingSub { font-size:min(4.4vw, 4vh, 19px); color:#bfe9ff; animation:openingBlink 1.8s ease-in-out infinite; }
+  @keyframes openingBlink { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+  @media (prefers-reduced-motion: reduce) { .openingSub { animation:none; opacity:.85; } }
 </style>
 </head>
 <body>
+<div id="screen-opening">
+  <canvas id="openingCanvas"></canvas>
+  <div class="openingLogoWrap">
+    <div class="openingLogo">おとふる</div>
+    <div class="openingSub">タップしてはじめる</div>
+  </div>
+</div>
 <div id="rotateNotice"><div class="icon">📱↻</div><div class="msg">横向きにしてね</div></div>
 <div id="app">
 
   <!-- 曲選び -->
   <div class="screen active" id="screen-select">
-    <div class="topbar"><h1 class="title">ピアノ音ゲー</h1><span></span></div>
+    <div class="topbar"><h1 class="title">おとふる</h1><span></span></div>
     <div class="songlist" id="songlist"></div>
     <div class="settings" id="settingsBox" style="display:none">
       <div class="setrow"><span>手</span><div class="segset" data-key="hand">
@@ -217,6 +239,7 @@ let songIndex = [];
 let currentChart = null;
 let audioCtx = null, analyser = null, micStream = null;
 let demoMode = new URLSearchParams(location.search).get('demo') === '1';
+let openingDone = demoMode; // デモモードはオープニングを飛ばす（既存の撮影経路を壊さない）
 
 function loadSettings() {
   try {
@@ -709,6 +732,86 @@ if ('wakeLock' in navigator) {
 }
 
 // ---------------------------------------------------------------------------
+// オープニング（縦・横どちらでも成立する起動画面。タップで曲選びへ）
+// ---------------------------------------------------------------------------
+const openingScreenEl = document.getElementById('screen-opening');
+const openingCanvas = document.getElementById('openingCanvas');
+const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let openingRafId = null;
+let openingLastTime = 0;
+
+function makeOpeningNotes(n) {
+  const notes = [];
+  for (let i = 0; i < n; i++) {
+    notes.push({
+      x: Math.random(), y: Math.random(),
+      speed: 0.05 + Math.random() * 0.07,
+      w: 0.022 + Math.random() * 0.02,
+      h: 0.05 + Math.random() * 0.05,
+      hand: Math.random() < 0.5 ? 'R' : 'L',
+    });
+  }
+  return notes;
+}
+const openingNotes = makeOpeningNotes(16);
+
+function drawOpening(dt) {
+  const { ctx, w, h } = resizeCanvas(openingCanvas);
+  ctx.clearRect(0, 0, w, h);
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#0a1622');
+  grad.addColorStop(1, '#050b12');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  for (const n of openingNotes) {
+    if (!reduceMotion) {
+      n.y += n.speed * dt;
+      if (n.y > 1.15) { n.y = -0.15; n.x = Math.random(); }
+    }
+    const color = n.hand === 'R' ? '#4ce6ff' : '#ff9d4c';
+    const bx = n.x * w, by = n.y * h, bw = n.w * w, bh = n.h * h;
+    ctx.beginPath();
+    roundRectPath(ctx, bx, by, bw, bh, Math.min(bw, bh) / 2.4);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  const kbH = Math.min(120, h * 0.24);
+  const openingLayout = buildKeyLayout(48, 84, w);
+  drawKeyboard(ctx, openingLayout, w, h - kbH, kbH, new Map(), false);
+}
+
+function openingLoop(now) {
+  if (!openingLastTime) openingLastTime = now;
+  const dt = Math.min(0.05, (now - openingLastTime) / 1000);
+  openingLastTime = now;
+  drawOpening(dt);
+  if (!openingDone) openingRafId = requestAnimationFrame(openingLoop);
+}
+
+function startOpening() {
+  if (demoMode) { openingScreenEl.classList.add('hide'); return; }
+  drawOpening(0);
+  if (!reduceMotion) openingRafId = requestAnimationFrame(openingLoop);
+  window.addEventListener('resize', () => { if (!openingDone) drawOpening(0); });
+}
+
+function dismissOpening() {
+  if (openingDone) return;
+  openingDone = true;
+  if (openingRafId) cancelAnimationFrame(openingRafId);
+  openingScreenEl.classList.add('hide');
+  checkOrientation();
+}
+openingScreenEl.addEventListener('click', dismissOpening);
+
+startOpening();
+
+// ---------------------------------------------------------------------------
 // 起動
 // ---------------------------------------------------------------------------
 loadSongIndex().then(() => {
@@ -726,7 +829,7 @@ loadSongIndex().then(() => {
 // ---------------------------------------------------------------------------
 function checkOrientation() {
   const isPortrait = window.innerHeight > window.innerWidth;
-  document.body.classList.toggle('portrait-lock', isPortrait);
+  document.body.classList.toggle('portrait-lock', openingDone && isPortrait);
 }
 checkOrientation();
 window.addEventListener('resize', checkOrientation);

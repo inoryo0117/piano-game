@@ -1,6 +1,6 @@
 {
-  "name": "ピアノ音ゲー",
-  "short_name": "ピアノ音ゲー",
+  "name": "おとふる",
+  "short_name": "おとふる",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
