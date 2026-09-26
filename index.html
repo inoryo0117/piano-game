@@ -362,6 +362,12 @@ let micTimeData = null;
 let freeLoopId = null;
 let micSetupTime = 0;
 let micHeardSound = false;
+let micSource = null;
+let micMode = 'raw'; // 'raw'（制約付き）| 'std'（制約なしのフォールバック）
+let micFallbackTried = false;
+let micFallbackDone = false;
+const MIC_SILENCE_WARN_DEFAULT = 'マイクの音が届いていません。もう一度ボタンを押してください。';
+const MIC_SILENCE_WARN_AFTER_FALLBACK = 'マイクの音が届いていません（マイクの故障か、他のアプリが使用中かもしれません）。もう一度ボタンを押してください。';
 
 // iOS/iPadOS の Safari 対策：AudioContext はユーザー操作の同期区間の先頭で作って resume する
 // （await の後で作ると suspended のまま動かないことがある）。グラフは destination まで
@@ -380,37 +386,72 @@ document.addEventListener('click', () => {
 function teardownMic() {
   if (micStream) { micStream.getTracks().forEach((t) => t.stop()); }
   micStream = null;
+  micSource = null;
   analyser = null;
   if (audioCtx) { audioCtx.close().catch(() => {}); }
   audioCtx = null;
 }
 
+function loadMicMode() {
+  try { return localStorage.getItem('piano_mic_mode') === 'std' ? 'std' : 'raw'; } catch (e) { return 'raw'; }
+}
+
 async function setupMic() {
   if (demoMode) { els.micStatus.textContent = 'デモモード：マイク不要で自動演奏します。'; return true; }
   ensureAudioCtx(); // 同期区間の先頭で作成・resume
+  micFallbackTried = false;
+  micFallbackDone = false;
+  micMode = loadMicMode();
+  const constraints = micMode === 'std'
+    ? { audio: true }
+    : { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
+    micStream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (e) {
     els.micStatus.textContent = 'マイクの許可が得られませんでした：' + e.message;
     return false;
   }
-  const src = audioCtx.createMediaStreamSource(micStream);
+  micSource = audioCtx.createMediaStreamSource(micStream);
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 4096;
   const silentGain = audioCtx.createGain();
   silentGain.gain.value = 0;
-  src.connect(analyser);
+  micSource.connect(analyser);
   analyser.connect(silentGain);
   silentGain.connect(audioCtx.destination);
   micTimeData = new Float32Array(analyser.fftSize);
   await audioCtx.resume().catch(() => {});
   els.micStatus.textContent = 'マイクOK。「ド」を弾いてみてください。';
-  if (els.micSilenceWarn) els.micSilenceWarn.style.display = 'none';
+  if (els.micSilenceWarn) {
+    els.micSilenceWarn.style.display = 'none';
+    els.micSilenceWarn.textContent = MIC_SILENCE_WARN_DEFAULT;
+  }
   micSetupTime = performance.now();
   micHeardSound = false;
   return true;
+}
+
+// 無音フォールバック：制約付き取得（'raw'）で入力が完全に無音のまま2秒経ったら、
+// AudioContext・analyser は使い回して制約なし（{ audio: true }）で取り直す。1回だけ試す。
+async function fallbackToStandardMic() {
+  micFallbackTried = true;
+  const oldStream = micStream;
+  const oldSource = micSource;
+  try {
+    const newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (oldSource) { try { oldSource.disconnect(); } catch (e) { /* ignore */ } }
+    if (oldStream) { oldStream.getTracks().forEach((t) => t.stop()); }
+    micStream = newStream;
+    micSource = audioCtx.createMediaStreamSource(micStream);
+    micSource.connect(analyser);
+    micMode = 'std';
+    try { localStorage.setItem('piano_mic_mode', 'std'); } catch (e) { /* ignore */ }
+    micSetupTime = performance.now();
+    micHeardSound = false;
+  } catch (e) {
+    // フォールバック取得も失敗：既存のストリームのまま続行
+  }
+  micFallbackDone = true;
 }
 
 els.micAllowBtn.addEventListener('click', async () => {
@@ -438,11 +479,18 @@ function startMicMeterLoop() {
     els.detectName.textContent = top.length ? midiName(top[0].midi) : '-';
     if (els.micDiag) {
       const db = 20 * Math.log10(rms + 1e-9);
-      els.micDiag.textContent = `状態: ${audioCtx.state} / ${audioCtx.sampleRate}Hz / レベル ${db.toFixed(0)}dB`;
+      const modeLabel = micMode === 'std' ? '標準' : '生音';
+      els.micDiag.textContent = `状態: ${audioCtx.state} / ${audioCtx.sampleRate}Hz / レベル ${db.toFixed(0)}dB / 取り方: ${modeLabel}`;
+    }
+    if (micMode === 'raw' && !micFallbackTried && !micHeardSound && performance.now() - micSetupTime > 2000) {
+      fallbackToStandardMic();
     }
     if (els.micSilenceWarn) {
       const silent = !micHeardSound && performance.now() - micSetupTime > 3000;
       els.micSilenceWarn.style.display = silent ? '' : 'none';
+      if (silent) {
+        els.micSilenceWarn.textContent = micFallbackDone ? MIC_SILENCE_WARN_AFTER_FALLBACK : MIC_SILENCE_WARN_DEFAULT;
+      }
     }
     if (document.getElementById('screen-mic').classList.contains('active')) requestAnimationFrame(loop);
   }
