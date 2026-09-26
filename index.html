@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ピアノ音ゲー">
 <meta name="theme-color" content="#050b12">
 <title>ピアノ音ゲー</title>
 <style>
@@ -13,10 +18,20 @@
     color:#eaf6fb; font-family:-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
     -webkit-user-select:none; user-select:none;
   }
-  #app { position:fixed; inset:0; }
+  #app { position:fixed; inset:0;
+    padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right);
+  }
   .screen { position:absolute; inset:0; display:none; flex-direction:column; overflow-y:auto;
     -webkit-overflow-scrolling:touch; }
   .screen.active { display:flex; }
+
+  #rotateNotice { position:fixed; inset:0; z-index:9999; display:none; background:#050b12; color:#eaf6fb;
+    flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; }
+  #rotateNotice .icon { font-size:56px; margin-bottom:14px; }
+  #rotateNotice .msg { font-size:20px; font-weight:700; line-height:1.6; }
+  body.portrait-lock #rotateNotice { display:flex; }
+  body.portrait-lock #app { display:none; }
 
   /* ---- 共通 ---- */
   .topbar { padding:16px 18px 6px; display:flex; align-items:center; justify-content:space-between; }
@@ -91,6 +106,7 @@
 </style>
 </head>
 <body>
+<div id="rotateNotice"><div class="icon">📱↻</div><div class="msg">横向きにしてね</div></div>
 <div id="app">
 
   <!-- 曲選び -->
@@ -704,6 +720,29 @@ loadSongIndex().then(() => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 縦向き警告（横向き専用ゲームなのでUIを隠して大きく案内する）
+// ---------------------------------------------------------------------------
+function checkOrientation() {
+  const isPortrait = window.innerHeight > window.innerWidth;
+  document.body.classList.toggle('portrait-lock', isPortrait);
+}
+checkOrientation();
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', checkOrientation);
+if (window.screen && window.screen.orientation) {
+  window.screen.orientation.addEventListener('change', checkOrientation);
+}
+
+// ---------------------------------------------------------------------------
+// Service Worker（オフライン起動用）
+// ---------------------------------------------------------------------------
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>
