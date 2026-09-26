@@ -39,6 +39,8 @@
   .backbtn { background:rgba(255,255,255,.08); border:1px solid rgba(150,200,230,.25); color:#cfe6f2;
     border-radius:10px; padding:7px 14px; font-size:13px; }
   .backbtn:active { background:rgba(255,255,255,.18); }
+  .bgmtoggle { background:transparent; border:none; font-size:20px; line-height:1; color:#cfe6f2; padding:6px; }
+  .bgmtoggle:active { opacity:.6; }
 
   /* ---- 曲選び ---- */
   #screen-select { padding-bottom:24px; }
@@ -91,11 +93,15 @@
   #screen-play { padding:0; }
   #playCanvas { display:block; width:100%; height:100%; touch-action:none; }
   .hud { position:absolute; inset:0; pointer-events:none; }
-  .hud .score { position:absolute; top:10px; left:14px; font-size:15px; color:#bfe9ff; font-variant-numeric:tabular-nums; }
-  .hud .progresswrap { position:absolute; top:10px; left:50%; transform:translateX(-50%); width:46%;
-    height:6px; background:rgba(255,255,255,.15); border-radius:4px; overflow:hidden; }
+  /* 進捗ゲージ＋得点：iPad のステータスバー（黒半透明で重なる）と衝突しないよう、
+     safe-area-inset-top に加えてステータスバー相当の最低24pxを必ず足して下げる。 */
+  .hud .hudtop { position:absolute; top:calc(env(safe-area-inset-top) + 24px); left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:10px; }
+  .hud .score { font-size:15px; color:#bfe9ff; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .hud .progresswrap { width:38vw; max-width:280px; height:6px; background:rgba(255,255,255,.15);
+    border-radius:4px; overflow:hidden; }
   .hud .progressbar { height:100%; width:0%; background:#4ce6ff; }
-  .hud .offset { position:absolute; top:10px; right:14px; font-size:12px; color:#7f9db0; }
+  .hud .offset { position:absolute; top:calc(env(safe-area-inset-top) + 24px); right:14px; font-size:12px; color:#7f9db0; }
   .pausebtn { position:absolute; bottom:calc(28% + 8px); right:12px; pointer-events:auto;
     background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25); color:#eaf6fb;
     border-radius:10px; padding:6px 12px; font-size:12px; }
@@ -126,6 +132,7 @@
   }
   .openingLogo { font-size:min(17vw, 15vh, 96px); font-weight:900; letter-spacing:.08em;
     color:#eaf6fb; text-shadow:0 0 18px rgba(76,230,255,.6), 0 0 40px rgba(255,157,76,.35); }
+  .openingBgmToggle { position:absolute; top:calc(env(safe-area-inset-top) + 10px); right:14px; z-index:2; }
   .openingSub { font-size:min(4.4vw, 4vh, 19px); color:#bfe9ff; animation:openingBlink 1.8s ease-in-out infinite; }
   @keyframes openingBlink { 0%,100% { opacity:.3; } 50% { opacity:1; } }
   @media (prefers-reduced-motion: reduce) { .openingSub { animation:none; opacity:.85; } }
@@ -134,9 +141,10 @@
 <body>
 <div id="screen-opening">
   <canvas id="openingCanvas"></canvas>
+  <button class="bgmtoggle openingBgmToggle" id="openingBgmToggleBtn" aria-label="オープニングの音のオン/オフ">🔈</button>
   <div class="openingLogoWrap">
     <div class="openingLogo">おとふる</div>
-    <div class="openingSub">タップしてはじめる</div>
+    <div class="openingSub" id="openingSub">🎵 タップでおとがなるよ</div>
   </div>
 </div>
 <div id="rotateNotice"><div class="icon">📱↻</div><div class="msg">横向きにしてね</div></div>
@@ -144,7 +152,9 @@
 
   <!-- 曲選び -->
   <div class="screen active" id="screen-select">
-    <div class="topbar"><h1 class="title">おとふる</h1><span></span></div>
+    <div class="topbar"><h1 class="title">おとふる</h1>
+      <button class="bgmtoggle" id="bgmToggleBtn" aria-label="オープニングの音のオン/オフ">🔈</button>
+    </div>
     <div class="songlist" id="songlist"></div>
     <div class="settings" id="settingsBox" style="display:none">
       <div class="setrow"><span>手</span><div class="segset" data-key="hand">
@@ -208,8 +218,10 @@
   <div class="screen" id="screen-play">
     <canvas id="playCanvas"></canvas>
     <div class="hud">
-      <div class="score" id="hudScore">SCORE 0</div>
-      <div class="progresswrap"><div class="progressbar" id="hudProgress"></div></div>
+      <div class="hudtop">
+        <div class="progresswrap"><div class="progressbar" id="hudProgress"></div></div>
+        <div class="score" id="hudScore">SCORE 0</div>
+      </div>
       <div class="offset" id="hudOffset"></div>
     </div>
     <button class="pausebtn" id="pauseBtn">一時停止</button>
@@ -258,7 +270,10 @@ let songIndex = [];
 let currentChart = null;
 let audioCtx = null, analyser = null, micStream = null;
 let demoMode = new URLSearchParams(location.search).get('demo') === '1';
-let openingDone = demoMode; // デモモードはオープニングを飛ばす（既存の撮影経路を壊さない）
+const openingParam = new URLSearchParams(location.search).get('opening') === '1';
+// デモモードはオープニングを飛ばす（既存の撮影経路を壊さない）。ただし
+// ?demo=1&opening=1 のときだけ、オープニング演出の自動撮影のために表示する。
+let openingDone = demoMode && !openingParam;
 
 function loadSettings() {
   try {
@@ -272,6 +287,8 @@ function saveSettings() {
 }
 
 function showScreen(id) {
+  // マイクを使う画面ではオープニングBGMが絶対に鳴っていないようにする。
+  if (id === 'screen-mic' || id === 'screen-play' || id === 'screen-free') stopOpeningBGM(0.05);
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
 }
 
@@ -286,6 +303,8 @@ async function loadSongIndex() {
   } catch (e) {
     songIndex = [];
   }
+  // レベルの低い順、同レベルは長さの短い順に並べる。
+  songIndex.sort((a, b) => (a.level || 0) - (b.level || 0) || (a.duration || 0) - (b.duration || 0));
   renderSongList();
 }
 
@@ -321,12 +340,23 @@ async function selectSong(meta) {
   els.settingsBox.style.display = '';
   els.startBar.style.display = '';
   syncSettingUI();
+  scrollSettingsIntoViewIfNeeded();
   try {
     const res = await fetch(`songs/${meta.id}.json?_=` + Date.now());
     currentChart = await res.json();
   } catch (e) {
     currentChart = null;
   }
+}
+
+// 曲数が少なくて既に画面内に収まっているなら動かさない。はみ出ているときだけスクロールする。
+function scrollSettingsIntoViewIfNeeded() {
+  const el = els.settingsBox;
+  const container = document.getElementById('screen-select');
+  const rect = el.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  const fullyVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+  if (!fullyVisible) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function syncSettingUI() {
@@ -884,6 +914,162 @@ const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-mo
 let openingRafId = null;
 let openingLastTime = 0;
 
+// ---------------------------------------------------------------------------
+// オープニングBGM（純データ。合成関数はここ index.html 側に置く。
+// 後で Node から同じデータで WAV を作るので window.OtofuruBGM から取り出せるようにする）
+// ---------------------------------------------------------------------------
+// 100bpm・4/4・8小節（1小節2.4秒）でループする。最後の3拍(G4 A4 B4)がアウフタクトになって
+// 次のループ頭の C5 へ滑らかにつながるようにしてある。
+const OPENING_BGM = {
+  loopSec: 19.2,
+  notes: [
+    // --- メロディ ---
+    { t: 0.0, m: 72, d: 0.55, v: 0.75 }, { t: 0.6, m: 74, d: 0.55, v: 0.72 },
+    { t: 1.2, m: 76, d: 0.55, v: 0.75 }, { t: 1.8, m: 79, d: 0.55, v: 0.80 },
+    { t: 2.4, m: 76, d: 0.55, v: 0.75 }, { t: 3.0, m: 74, d: 0.55, v: 0.70 },
+    { t: 3.6, m: 72, d: 0.55, v: 0.70 }, { t: 4.2, m: 74, d: 0.55, v: 0.72 },
+    { t: 4.8, m: 76, d: 0.55, v: 0.75 }, { t: 5.4, m: 77, d: 0.55, v: 0.75 },
+    { t: 6.0, m: 79, d: 0.55, v: 0.78 }, { t: 6.6, m: 81, d: 0.55, v: 0.80 },
+    { t: 7.2, m: 79, d: 1.15, v: 0.80 }, { t: 8.4, m: 76, d: 0.55, v: 0.72 },
+    { t: 9.0, m: 74, d: 0.55, v: 0.70 },
+    { t: 9.6, m: 72, d: 0.55, v: 0.78 }, { t: 10.2, m: 76, d: 0.55, v: 0.80 },
+    { t: 10.8, m: 79, d: 0.55, v: 0.82 }, { t: 11.4, m: 84, d: 0.55, v: 0.90 },
+    { t: 12.0, m: 84, d: 0.55, v: 0.85 }, { t: 12.6, m: 81, d: 0.55, v: 0.78 },
+    { t: 13.2, m: 79, d: 0.55, v: 0.75 }, { t: 13.8, m: 77, d: 0.55, v: 0.72 },
+    { t: 14.4, m: 76, d: 0.55, v: 0.72 }, { t: 15.0, m: 74, d: 0.55, v: 0.70 },
+    { t: 15.6, m: 72, d: 1.15, v: 0.75 },
+    { t: 16.8, m: 67, d: 0.55, v: 0.60 }, { t: 17.4, m: 69, d: 0.55, v: 0.62 },
+    { t: 18.0, m: 71, d: 0.55, v: 0.65 },
+    // --- 簡単な伴奏（各小節の根音＋五度、控えめな音量） ---
+    { t: 0.0, m: 48, d: 1.15, v: 0.34 }, { t: 1.2, m: 55, d: 1.15, v: 0.30 },
+    { t: 2.4, m: 43, d: 1.15, v: 0.34 }, { t: 3.6, m: 50, d: 1.15, v: 0.30 },
+    { t: 4.8, m: 45, d: 1.15, v: 0.34 }, { t: 6.0, m: 52, d: 1.15, v: 0.30 },
+    { t: 7.2, m: 41, d: 1.15, v: 0.34 }, { t: 8.4, m: 48, d: 1.15, v: 0.30 },
+    { t: 9.6, m: 48, d: 1.15, v: 0.36 }, { t: 10.8, m: 55, d: 1.15, v: 0.32 },
+    { t: 12.0, m: 43, d: 1.15, v: 0.36 }, { t: 13.2, m: 50, d: 1.15, v: 0.32 },
+    { t: 14.4, m: 45, d: 1.15, v: 0.36 }, { t: 15.6, m: 52, d: 1.15, v: 0.32 },
+    { t: 16.8, m: 43, d: 1.15, v: 0.36 }, { t: 18.0, m: 50, d: 1.15, v: 0.32 },
+  ],
+  voice: {
+    harmonics: [1, 2, 3, 4, 5, 6],
+    harmonicGains: [1.0, 0.5, 0.28, 0.16, 0.09, 0.05],
+    attack: 0.006,
+    decay: 0.9,
+    gain: 0.22,
+  },
+};
+window.OtofuruBGM = OPENING_BGM;
+
+function loadBgmEnabled() {
+  try { return localStorage.getItem('piano_bgm_on') !== 'off'; } catch (e) { return true; }
+}
+function saveBgmEnabled(on) {
+  try { localStorage.setItem('piano_bgm_on', on ? 'on' : 'off'); } catch (e) { /* ignore */ }
+}
+let bgmEnabled = loadBgmEnabled();
+function updateBgmToggleUI() {
+  const label = bgmEnabled ? '🔈' : '🔇';
+  if (els.bgmToggleBtn) els.bgmToggleBtn.textContent = label;
+  if (els.openingBgmToggleBtn) els.openingBgmToggleBtn.textContent = label;
+}
+function toggleBgmEnabled(ev) {
+  if (ev) ev.stopPropagation();
+  bgmEnabled = !bgmEnabled;
+  saveBgmEnabled(bgmEnabled);
+  updateBgmToggleUI();
+  if (!bgmEnabled) stopOpeningBGM(0.05);
+}
+if (els.bgmToggleBtn) els.bgmToggleBtn.addEventListener('click', toggleBgmEnabled);
+if (els.openingBgmToggleBtn) els.openingBgmToggleBtn.addEventListener('click', toggleBgmEnabled);
+updateBgmToggleUI();
+
+// 1音を鳴らす（ピアノ風：倍音数本＋速いアタック＋指数減衰）。オープニングBGM専用のシンセ。
+function scheduleBgmNote(ctx, dest, note, baseTime, voice) {
+  const freq = midiToFreq(note.m);
+  const t0 = baseTime + note.t;
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0, t0);
+  const peak = voice.gain * (note.v != null ? note.v : 1);
+  env.gain.linearRampToValueAtTime(peak, t0 + voice.attack);
+  env.gain.setTargetAtTime(0, t0 + voice.attack, voice.decay);
+  env.connect(dest);
+  const stopAt = t0 + note.d + voice.decay * 5;
+  const oscs = [];
+  voice.harmonics.forEach((h, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq * h, t0);
+    const hg = ctx.createGain();
+    hg.gain.value = voice.harmonicGains[i] != null ? voice.harmonicGains[i] : 0;
+    osc.connect(hg); hg.connect(env);
+    osc.start(t0);
+    osc.stop(stopAt);
+    oscs.push(osc);
+  });
+  return oscs;
+}
+
+let bgmPlaying = false;
+let bgmTimerId = null;
+let bgmMasterGain = null;
+let bgmOscNodes = [];
+let bgmNoteQueue = []; // { at, until, m }（AudioContext時刻。鍵盤ハイライトの同期用）
+const bgmLitKeys = new Map();
+
+function scheduleBgmLoop(ctx, startAt) {
+  for (const note of OPENING_BGM.notes) {
+    bgmOscNodes.push(...scheduleBgmNote(ctx, bgmMasterGain, note, startAt, OPENING_BGM.voice));
+    bgmNoteQueue.push({ at: startAt + note.t, until: startAt + note.t + note.d, m: note.m });
+  }
+  const lead = 0.5; // 秒（先読みで次ループを予約する）
+  const delayMs = Math.max(0, OPENING_BGM.loopSec - lead) * 1000;
+  bgmTimerId = setTimeout(() => {
+    if (!bgmPlaying) return;
+    scheduleBgmLoop(ctx, startAt + OPENING_BGM.loopSec);
+  }, delayMs);
+}
+
+function playOpeningBGM() {
+  if (!bgmEnabled) return;
+  const ctx = ensureAudioCtx();
+  bgmMasterGain = ctx.createGain();
+  bgmMasterGain.gain.setValueAtTime(0, ctx.currentTime);
+  bgmMasterGain.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.15);
+  bgmMasterGain.connect(ctx.destination);
+  bgmPlaying = true;
+  scheduleBgmLoop(ctx, ctx.currentTime + 0.05);
+}
+
+// マイクを使う画面へ進むとき等に呼ぶ。fadeSec 秒でフェードアウトしてから完全停止する。
+function stopOpeningBGM(fadeSec) {
+  bgmPlaying = false;
+  if (bgmTimerId) { clearTimeout(bgmTimerId); bgmTimerId = null; }
+  if (bgmMasterGain && audioCtx) {
+    const now = audioCtx.currentTime;
+    const f = fadeSec != null ? fadeSec : 0.4;
+    try {
+      bgmMasterGain.gain.cancelScheduledValues(now);
+      bgmMasterGain.gain.setValueAtTime(bgmMasterGain.gain.value, now);
+      bgmMasterGain.gain.linearRampToValueAtTime(0, now + f);
+    } catch (e) { /* ignore */ }
+  }
+  bgmMasterGain = null;
+  bgmOscNodes = [];
+  bgmNoteQueue = [];
+  bgmLitKeys.clear();
+}
+
+// 現在鳴っているBGMの音に合わせて鍵盤を光らせる（オープニングの鍵盤と同期）。
+function updateBgmLitKeys() {
+  bgmLitKeys.clear();
+  if (!audioCtx || !bgmPlaying) return;
+  const now = audioCtx.currentTime;
+  while (bgmNoteQueue.length && bgmNoteQueue[0].until < now - 0.05) bgmNoteQueue.shift();
+  for (const ev of bgmNoteQueue) {
+    if (ev.at <= now && now <= ev.until) bgmLitKeys.set(ev.m, ev.m < 60 ? 'rgba(255,157,76,.85)' : '#4ce6ff');
+  }
+}
+
 function makeOpeningNotes(n) {
   const notes = [];
   for (let i = 0; i < n; i++) {
@@ -924,9 +1110,10 @@ function drawOpening(dt) {
     ctx.shadowBlur = 0;
   }
 
+  updateBgmLitKeys();
   const kbH = Math.min(120, h * 0.24);
   const openingLayout = buildKeyLayout(48, 84, w);
-  drawKeyboard(ctx, openingLayout, w, h - kbH, kbH, new Map(), false);
+  drawKeyboard(ctx, openingLayout, w, h - kbH, kbH, bgmLitKeys, false);
 }
 
 function openingLoop(now) {
@@ -937,11 +1124,38 @@ function openingLoop(now) {
   if (!openingDone) openingRafId = requestAnimationFrame(openingLoop);
 }
 
+// オープニングは2回タップする：
+//  1回目＝オープニングに留まったまま BGM をループ再生開始（案内が「はじめる▶」に変わる）
+//  2回目＝BGM を短くフェードアウトして曲選びへ
+let openingPhase = 'wait'; // 'wait' -> 'bgm' -> 'done'
+
+function handleOpeningTap() {
+  if (openingPhase === 'wait') {
+    openingPhase = 'bgm';
+    playOpeningBGM();
+    if (els.openingSub) els.openingSub.textContent = 'はじめる ▶';
+  } else if (openingPhase === 'bgm') {
+    finishOpening();
+  }
+}
+
+function finishOpening() {
+  if (openingPhase === 'done') return;
+  openingPhase = 'done';
+  stopOpeningBGM(0.4);
+  dismissOpening();
+}
+
 function startOpening() {
-  if (demoMode) { openingScreenEl.classList.add('hide'); return; }
+  if (demoMode && !openingParam) { openingScreenEl.classList.add('hide'); return; }
   drawOpening(0);
   if (!reduceMotion) openingRafId = requestAnimationFrame(openingLoop);
   window.addEventListener('resize', () => { if (!openingDone) drawOpening(0); });
+  if (demoMode && openingParam) {
+    // 動画撮影用の自動進行：1.5秒後に1回目のタップ（BGM開始演出）→8秒後に2回目のタップ（曲選びへ）
+    setTimeout(() => handleOpeningTap(), 1500);
+    setTimeout(() => handleOpeningTap(), 1500 + 8000);
+  }
 }
 
 function dismissOpening() {
@@ -951,7 +1165,7 @@ function dismissOpening() {
   openingScreenEl.classList.add('hide');
   checkOrientation();
 }
-openingScreenEl.addEventListener('click', dismissOpening);
+openingScreenEl.addEventListener('click', handleOpeningTap);
 
 startOpening();
 
@@ -959,7 +1173,7 @@ startOpening();
 // 起動
 // ---------------------------------------------------------------------------
 loadSongIndex().then(() => {
-  if (demoMode && songIndex.length > 0) {
+  if (demoMode && !openingParam && songIndex.length > 0) {
     const wantId = new URLSearchParams(location.search).get('song');
     const wantSpeed = new URLSearchParams(location.search).get('speed');
     if (wantSpeed) settings.speed = wantSpeed; // 撮影・確認用（?demo=1&speed=1.5）

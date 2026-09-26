@@ -6,7 +6,7 @@
 //  - キャッシュ名にバージョン番号を入れ、activate で古いキャッシュを消す。
 //  - songs/index.json に載っている曲は install 時にまとめて先読みキャッシュする。
 
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `piano-game-${CACHE_VERSION}`;
 
 const SCOPE_URL = new URL(self.registration.scope);
