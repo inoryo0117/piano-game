@@ -76,6 +76,15 @@
   .hint { color:#89aabb; font-size:13px; line-height:1.6; }
   .freekeys { margin-top:18px; }
 
+  /* ---- 自由演奏 ---- */
+  #screen-free { padding:0; }
+  .freehint { padding:2px 16px 8px; text-align:center; }
+  .freestage { position:relative; flex:1; min-height:0; }
+  #freeCanvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .freenote { position:absolute; left:0; right:0; top:16%; text-align:center; pointer-events:none;
+    font-size:38px; font-weight:800; color:#4ce6ff; text-shadow:0 0 16px rgba(76,230,255,.55); }
+  .freenote.idle { font-size:15px; font-weight:400; color:#7f9db0; text-shadow:none; }
+
   /* ---- プレイ ---- */
   #screen-play { padding:0; }
   #playCanvas { display:block; width:100%; height:100%; touch-action:none; }
@@ -145,6 +154,8 @@
         <button class="seg" data-val="0.5">0.5</button>
         <button class="seg" data-val="0.75">0.75</button>
         <button class="seg" data-val="1">1.0</button>
+        <button class="seg" data-val="1.25">1.25</button>
+        <button class="seg" data-val="1.5">1.5</button>
       </div></div>
       <div class="setrow"><span>モード</span><div class="segset" data-key="mode">
         <button class="seg" data-val="flow">ながれる</button>
@@ -182,7 +193,11 @@
   <!-- 自由演奏 -->
   <div class="screen" id="screen-free">
     <div class="topbar"><button class="backbtn" id="freeBackBtn">←もどる</button><span></span></div>
-    <canvas id="freeCanvas" style="flex:1; width:100%;"></canvas>
+    <p class="hint freehint">ピアノを弾くと、その音の鍵盤が光ります（マイクの聞こえ方の確認用）</p>
+    <div class="freestage">
+      <canvas id="freeCanvas"></canvas>
+      <div class="freenote idle" id="freeNoteName">ピアノを弾いてみてね</div>
+    </div>
   </div>
 
   <!-- プレイ -->
@@ -694,6 +709,12 @@ els.freeBackBtn.addEventListener('click', () => {
   showScreen('screen-mic');
 });
 
+function noteDisplayName(m) {
+  const solfege = SOLFEGE[((m % 12) + 12) % 12] || '';
+  const name = midiName(m);
+  return solfege ? `${solfege}（${name}）` : name;
+}
+
 function startFreeLoop() {
   const canvas = els.freeCanvas;
   const kbRange = { lo: 36, hi: 96 };
@@ -704,16 +725,28 @@ function startFreeLoop() {
     ctx.fillRect(0, 0, w, h);
     const fLayout = buildKeyLayout(kbRange.lo, kbRange.hi, w);
     const lit = new Map();
+    let primaryMidi = null;
     if (demoMode) {
       const tSec = performance.now() / 1000;
       const m = 60 + Math.floor(tSec) % 12;
       lit.set(m, '#4ce6ff');
+      primaryMidi = m;
     } else if (analyser) {
       const spec = readSpectrumFromMic();
       const top = detectFree(spec, { topN: 3, minDb: 10, minMidi: kbRange.lo, maxMidi: kbRange.hi });
       for (const t of top) lit.set(t.midi, '#4ce6ff');
+      if (top.length) primaryMidi = top[0].midi;
     }
     drawKeyboard(ctx, fLayout, w, h - 120, 120, lit);
+    if (els.freeNoteName) {
+      if (primaryMidi != null) {
+        els.freeNoteName.textContent = noteDisplayName(primaryMidi);
+        els.freeNoteName.classList.remove('idle');
+      } else {
+        els.freeNoteName.textContent = 'ピアノを弾いてみてね';
+        els.freeNoteName.classList.add('idle');
+      }
+    }
     if (document.getElementById('screen-free').classList.contains('active')) freeLoopId = requestAnimationFrame(loop);
   }
   loop();
@@ -817,6 +850,8 @@ startOpening();
 loadSongIndex().then(() => {
   if (demoMode && songIndex.length > 0) {
     const wantId = new URLSearchParams(location.search).get('song');
+    const wantSpeed = new URLSearchParams(location.search).get('speed');
+    if (wantSpeed) settings.speed = wantSpeed; // 撮影・確認用（?demo=1&speed=1.5）
     const meta = (wantId && songIndex.find((s) => s.id === wantId)) || songIndex[0];
     selectSong(meta).then(() => {
       setTimeout(async () => { await setupMic(); startPlay(); }, 300);
