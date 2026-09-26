@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#050b12">
+<title>ピアノ音ゲー</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#050b12; }
+  body {
+    color:#eaf6fb; font-family:-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    -webkit-user-select:none; user-select:none;
+  }
+  #app { position:fixed; inset:0; }
+  .screen { position:absolute; inset:0; display:none; flex-direction:column; overflow-y:auto;
+    -webkit-overflow-scrolling:touch; }
+  .screen.active { display:flex; }
+
+  /* ---- 共通 ---- */
+  .topbar { padding:16px 18px 6px; display:flex; align-items:center; justify-content:space-between; }
+  h1.title { font-size:20px; letter-spacing:.03em; }
+  .backbtn { background:rgba(255,255,255,.08); border:1px solid rgba(150,200,230,.25); color:#cfe6f2;
+    border-radius:10px; padding:7px 14px; font-size:13px; }
+  .backbtn:active { background:rgba(255,255,255,.18); }
+
+  /* ---- 曲選び ---- */
+  #screen-select { padding-bottom:24px; }
+  .songlist { padding:8px 16px 20px; display:flex; flex-direction:column; gap:10px; max-width:640px;
+    width:100%; margin:0 auto; }
+  .songcard { display:block; text-align:left; background:rgba(255,255,255,.06); border:1px solid rgba(120,220,255,.20);
+    border-radius:14px; padding:14px 16px; color:inherit; }
+  .songcard.selected { border-color:#4ce6ff; background:rgba(76,230,255,.12); }
+  .songcard .name { font-size:16px; font-weight:700; }
+  .songcard .meta { font-size:12px; color:#89aabb; margin-top:4px; }
+  .songcard .lv { display:inline-block; margin-top:6px; font-size:11px; background:#2c4a5a; color:#bfe9ff;
+    border-radius:99px; padding:2px 9px; }
+  .empty-msg { padding:30px 20px; text-align:center; color:#7f9db0; font-size:13px; }
+
+  .settings { padding:6px 16px 10px; max-width:640px; width:100%; margin:0 auto; }
+  .setrow { display:flex; align-items:center; justify-content:space-between; padding:10px 2px;
+    border-bottom:1px solid rgba(255,255,255,.07); font-size:14px; }
+  .segset { display:flex; gap:6px; }
+  .seg { background:rgba(255,255,255,.08); border:1px solid rgba(150,200,230,.2); color:#cfe6f2;
+    border-radius:8px; padding:6px 12px; font-size:13px; }
+  .seg.on { background:#2fa3c8; border-color:#7fd4ea; color:#fff; font-weight:700; }
+  .startbar { padding:14px 16px 26px; max-width:640px; width:100%; margin:0 auto; }
+  .bigbtn { width:100%; padding:16px; border-radius:14px; border:none; font-size:17px; font-weight:700;
+    background:linear-gradient(180deg,#4ce6ff,#2fa3c8); color:#04222b; }
+  .bigbtn:active { filter:brightness(.9); }
+  .bigbtn.secondary { background:rgba(255,255,255,.08); color:#cfe6f2; border:1px solid rgba(150,200,230,.25); }
+
+  /* ---- マイク準備 ---- */
+  #screen-mic { align-items:center; justify-content:flex-start; padding-top:10px; }
+  .micbox { max-width:520px; width:100%; margin:0 auto; padding:14px 18px; text-align:center; }
+  .levelmeter { height:14px; border-radius:8px; background:rgba(255,255,255,.08); overflow:hidden;
+    margin:18px 0 10px; border:1px solid rgba(150,200,230,.2); }
+  .levelfill { height:100%; width:0%; background:linear-gradient(90deg,#4ce6ff,#7fffc0); }
+  .detectname { font-size:34px; font-weight:800; margin:14px 0 4px; color:#4ce6ff; min-height:44px; }
+  .hint { color:#89aabb; font-size:13px; line-height:1.6; }
+  .freekeys { margin-top:18px; }
+
+  /* ---- プレイ ---- */
+  #screen-play { padding:0; }
+  #playCanvas { display:block; width:100%; height:100%; touch-action:none; }
+  .hud { position:absolute; inset:0; pointer-events:none; }
+  .hud .score { position:absolute; top:10px; left:14px; font-size:15px; color:#bfe9ff; font-variant-numeric:tabular-nums; }
+  .hud .progresswrap { position:absolute; top:10px; left:50%; transform:translateX(-50%); width:46%;
+    height:6px; background:rgba(255,255,255,.15); border-radius:4px; overflow:hidden; }
+  .hud .progressbar { height:100%; width:0%; background:#4ce6ff; }
+  .hud .offset { position:absolute; top:10px; right:14px; font-size:12px; color:#7f9db0; }
+  .pausebtn { position:absolute; bottom:calc(28% + 8px); right:12px; pointer-events:auto;
+    background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25); color:#eaf6fb;
+    border-radius:10px; padding:6px 12px; font-size:12px; }
+
+  /* ---- 結果 ---- */
+  #screen-result { align-items:center; justify-content:center; }
+  .resultbox { max-width:420px; width:100%; margin:0 auto; text-align:center; padding:20px; }
+  .resultbox .score { font-size:44px; font-weight:800; color:#4ce6ff; margin:6px 0 14px; }
+  .resultrow { display:flex; justify-content:space-between; padding:7px 4px; border-bottom:1px solid rgba(255,255,255,.08);
+    font-size:14px; }
+  .resultbtns { display:flex; gap:10px; margin-top:20px; }
+
+  .pausemenu { position:absolute; inset:0; background:rgba(3,8,12,.85); display:none; align-items:center;
+    justify-content:center; z-index:20; }
+  .pausemenu.show { display:flex; }
+  .pausebox { background:#0c1620; border:1px solid rgba(150,200,230,.25); border-radius:16px; padding:22px 26px;
+    text-align:center; }
+  .pausebox .bigbtn { margin-top:10px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 曲選び -->
+  <div class="screen active" id="screen-select">
+    <div class="topbar"><h1 class="title">ピアノ音ゲー</h1><span></span></div>
+    <div class="songlist" id="songlist"></div>
+    <div class="settings" id="settingsBox" style="display:none">
+      <div class="setrow"><span>手</span><div class="segset" data-key="hand">
+        <button class="seg" data-val="both">両手</button>
+        <button class="seg" data-val="R">右手</button>
+        <button class="seg" data-val="L">左手</button>
+      </div></div>
+      <div class="setrow"><span>速さ</span><div class="segset" data-key="speed">
+        <button class="seg" data-val="0.5">0.5</button>
+        <button class="seg" data-val="0.75">0.75</button>
+        <button class="seg" data-val="1">1.0</button>
+      </div></div>
+      <div class="setrow"><span>モード</span><div class="segset" data-key="mode">
+        <button class="seg" data-val="flow">ながれる</button>
+        <button class="seg" data-val="wait">まつ</button>
+      </div></div>
+      <div class="setrow"><span>遅延補正</span><div class="segset" data-key="offset">
+        <button class="seg" data-val="-100">-100</button>
+        <button class="seg" data-val="0">0</button>
+        <button class="seg" data-val="100">+100</button>
+      </div></div>
+    </div>
+    <div class="startbar" id="startBar" style="display:none">
+      <button class="bigbtn" id="toMicBtn">マイクの準備へ</button>
+    </div>
+  </div>
+
+  <!-- マイク準備 -->
+  <div class="screen" id="screen-mic">
+    <div class="topbar"><button class="backbtn" id="micBackBtn">←曲選びへ</button><span></span></div>
+    <div class="micbox">
+      <p class="hint" id="micStatus">マイクを使う許可を押してください。</p>
+      <button class="bigbtn" id="micAllowBtn">マイクを許可する</button>
+      <div class="levelmeter"><div class="levelfill" id="levelFill"></div></div>
+      <p class="hint">「ドを弾いてみて」→ 検出した音名がここに出ます</p>
+      <div class="detectname" id="detectName">-</div>
+      <div class="freekeys">
+        <button class="bigbtn secondary" id="freePlayBtn">自由演奏モードへ（実機確認用）</button>
+      </div>
+      <div style="margin-top:18px">
+        <button class="bigbtn" id="startPlayBtn">はじめる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自由演奏 -->
+  <div class="screen" id="screen-free">
+    <div class="topbar"><button class="backbtn" id="freeBackBtn">←もどる</button><span></span></div>
+    <canvas id="freeCanvas" style="flex:1; width:100%;"></canvas>
+  </div>
+
+  <!-- プレイ -->
+  <div class="screen" id="screen-play">
+    <canvas id="playCanvas"></canvas>
+    <div class="hud">
+      <div class="score" id="hudScore">SCORE 0</div>
+      <div class="progresswrap"><div class="progressbar" id="hudProgress"></div></div>
+      <div class="offset" id="hudOffset"></div>
+    </div>
+    <button class="pausebtn" id="pauseBtn">一時停止</button>
+    <div class="pausemenu" id="pauseMenu">
+      <div class="pausebox">
+        <p style="font-size:16px;margin-bottom:6px">一時停止中</p>
+        <button class="bigbtn" id="resumeBtn">再開</button>
+        <button class="bigbtn secondary" id="quitBtn">曲選びへもどる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 結果 -->
+  <div class="screen" id="screen-result">
+    <div class="resultbox">
+      <div style="font-size:14px;color:#89aabb">結果</div>
+      <div class="score" id="resultScore">0</div>
+      <div class="resultrow"><span>PERFECT</span><span id="resPerfect">0</span></div>
+      <div class="resultrow"><span>GOOD</span><span id="resGood">0</span></div>
+      <div class="resultrow"><span>MISS</span><span id="resMiss">0</span></div>
+      <div class="resultrow"><span>最大コンボ</span><span id="resCombo">0</span></div>
+      <div class="resultrow"><span>正確さ</span><span id="resAccuracy">0%</span></div>
+      <div class="resultbtns">
+        <button class="bigbtn" id="retryBtn">もう一回</button>
+        <button class="bigbtn secondary" id="toSelectBtn">曲選びへ</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module">
+import {
+  computeSpectrum, salience, detectFree, createOnsetDetector, createGame,
+  computeKeyboardRange, isWhiteKey, midiToFreq, buildChordGroups,
+} from './piano-logic.js';
+
+// ---------------------------------------------------------------------------
+// 状態
+// ---------------------------------------------------------------------------
+const els = {};
+document.querySelectorAll('[id]').forEach((el) => { els[el.id] = el; });
+
+const settings = loadSettings();
+let songIndex = [];
+let currentChart = null;
+let audioCtx = null, analyser = null, micStream = null;
+let demoMode = new URLSearchParams(location.search).get('demo') === '1';
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem('piano_settings');
+    if (raw) return Object.assign({ hand: 'both', speed: '1', mode: 'flow', offsetMs: 0 }, JSON.parse(raw));
+  } catch (e) { /* ignore */ }
+  return { hand: 'both', speed: '1', mode: 'flow', offsetMs: 0 };
+}
+function saveSettings() {
+  try { localStorage.setItem('piano_settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
+}
+
+// ---------------------------------------------------------------------------
+// 曲選び
+// ---------------------------------------------------------------------------
+async function loadSongIndex() {
+  try {
+    const res = await fetch('songs/index.json?_=' + Date.now());
+    const data = await res.json();
+    songIndex = Array.isArray(data.songs) ? data.songs : [];
+  } catch (e) {
+    songIndex = [];
+  }
+  renderSongList();
+}
+
+function renderSongList() {
+  const box = els.songlist;
+  box.innerHTML = '';
+  if (songIndex.length === 0) {
+    box.innerHTML = '<div class="empty-msg">曲がまだありません。songs/index.json に追加されるとここに出ます。</div>';
+    return;
+  }
+  for (const s of songIndex) {
+    const card = document.createElement('button');
+    card.className = 'songcard';
+    card.dataset.id = s.id;
+    const mins = Math.floor((s.duration || 0) / 60);
+    const secs = Math.round((s.duration || 0) % 60);
+    card.innerHTML = `<div class="name">${escapeHtml(s.title || s.id)}</div>
+      <div class="meta">${escapeHtml(s.composer || '')} ・ ${mins}:${String(secs).padStart(2, '0')} ・ ${s.noteCount || '?'}音</div>
+      <span class="lv">Lv.${s.level || '?'}</span>`;
+    card.addEventListener('click', () => selectSong(s));
+    box.appendChild(card);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+let selectedSongMeta = null;
+async function selectSong(meta) {
+  selectedSongMeta = meta;
+  document.querySelectorAll('.songcard').forEach((c) => c.classList.toggle('selected', c.dataset.id === meta.id));
+  els.settingsBox.style.display = '';
+  els.startBar.style.display = '';
+  syncSettingUI();
+  try {
+    const res = await fetch(`songs/${meta.id}.json?_=` + Date.now());
+    currentChart = await res.json();
+  } catch (e) {
+    currentChart = null;
+  }
+}
+
+function syncSettingUI() {
+  document.querySelectorAll('.segset').forEach((group) => {
+    const key = group.dataset.key;
+    const cur = key === 'offset' ? String(settings.offsetMs) : key === 'speed' ? String(settings.speed) : settings[key];
+    group.querySelectorAll('.seg').forEach((btn) => btn.classList.toggle('on', btn.dataset.val === cur));
+  });
+}
+
+document.querySelectorAll('.segset').forEach((group) => {
+  group.querySelectorAll('.seg').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = group.dataset.key;
+      if (key === 'offset') settings.offsetMs = Number(btn.dataset.val);
+      else if (key === 'speed') settings.speed = btn.dataset.val;
+      else settings[key] = btn.dataset.val;
+      saveSettings();
+      syncSettingUI();
+    });
+  });
+});
+
+els.toMicBtn.addEventListener('click', () => {
+  if (!currentChart) return;
+  showScreen('screen-mic');
+});
+
+// ---------------------------------------------------------------------------
+// マイク準備・自由演奏
+// ---------------------------------------------------------------------------
+let micTimeData = null;
+let freeLoopId = null;
+
+async function setupMic() {
+  if (demoMode) { els.micStatus.textContent = 'デモモード：マイク不要で自動演奏します。'; return true; }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+  } catch (e) {
+    els.micStatus.textContent = 'マイクの許可が得られませんでした：' + e.message;
+    return false;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(micStream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 4096;
+  src.connect(analyser);
+  micTimeData = new Float32Array(analyser.fftSize);
+  els.micStatus.textContent = 'マイクOK。「ド」を弾いてみてください。';
+  return true;
+}
+
+els.micAllowBtn.addEventListener('click', async () => {
+  const ok = await setupMic();
+  if (ok) startMicMeterLoop();
+});
+
+function readSpectrumFromMic() {
+  analyser.getFloatTimeDomainData(micTimeData);
+  return computeSpectrum(micTimeData, audioCtx.sampleRate);
+}
+
+function startMicMeterLoop() {
+  function loop() {
+    if (!analyser) return;
+    analyser.getFloatTimeDomainData(micTimeData);
+    let sum = 0;
+    for (let i = 0; i < micTimeData.length; i++) sum += micTimeData[i] * micTimeData[i];
+    const rms = Math.sqrt(sum / micTimeData.length);
+    els.levelFill.style.width = Math.min(100, rms * 400) + '%';
+    const spec = computeSpectrum(micTimeData, audioCtx.sampleRate);
+    const top = detectFree(spec, { topN: 1, minDb: 6 });
+    els.detectName.textContent = top.length ? midiName(top[0].midi) : '-';
+    if (document.getElementById('screen-mic').classList.contains('active')) requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function midiName(m) {
+  const oct = Math.floor(m / 12) - 1;
+  return NOTE_NAMES[m % 12] + oct;
+}
+
+els.micBackBtn.addEventListener('click', () => showScreen('screen-select'));
+els.startPlayBtn.addEventListener('click', () => startPlay());
+
+// ---------------------------------------------------------------------------
+// 鍵盤レイアウト
+// ---------------------------------------------------------------------------
+function buildKeyLayout(lo, hi, width) {
+  const whites = [];
+  for (let m = lo; m <= hi; m++) if (isWhiteKey(m)) whites.push(m);
+  const whiteWidth = whites.length ? width / whites.length : width;
+  const keyX = new Map();
+  whites.forEach((m, i) => keyX.set(m, { x: i * whiteWidth, w: whiteWidth, white: true }));
+  for (let m = lo; m <= hi; m++) {
+    if (isWhiteKey(m)) continue;
+    let pw = m - 1;
+    while (pw >= lo && !isWhiteKey(pw)) pw--;
+    const pwEntry = keyX.get(pw);
+    if (pwEntry) {
+      const bw = whiteWidth * 0.62;
+      keyX.set(m, { x: pwEntry.x + pwEntry.w - bw / 2, w: bw, white: false });
+    }
+  }
+  return { whiteWidth, keyX, whites, lo, hi };
+}
+
+const SOLFEGE = { 0: 'ド', 2: 'レ', 4: 'ミ', 5: 'ファ', 7: 'ソ', 9: 'ラ', 11: 'シ' };
+function drawKeyboard(ctx, layout, width, kbY, kbH, litKeys, showLabels) {
+  // 白鍵
+  ctx.fillStyle = '#eef4f7';
+  for (const m of layout.whites) {
+    const k = layout.keyX.get(m);
+    ctx.fillStyle = litKeys.has(m) ? litKeys.get(m) : '#eef4f7';
+    ctx.fillRect(k.x, kbY, k.w - 1, kbH);
+    ctx.strokeStyle = 'rgba(0,0,0,.25)';
+    ctx.strokeRect(k.x, kbY, k.w - 1, kbH);
+  }
+  // 白鍵の音名（練習用・下端に薄く）
+  if (showLabels) {
+    ctx.textAlign = 'center';
+    for (const m of layout.whites) {
+      const k = layout.keyX.get(m);
+      const cx = k.x + (k.w - 1) / 2;
+      const isC4 = m === 60;
+      ctx.fillStyle = isC4 ? 'rgba(47,140,170,.65)' : 'rgba(60,80,95,.35)';
+      ctx.font = (isC4 ? '700 ' : '400 ') + Math.min(13, k.w * 0.42) + 'px -apple-system, sans-serif';
+      const label = SOLFEGE[((m % 12) + 12) % 12] || '';
+      const baseY = kbY + kbH - (isC4 ? 20 : 8);
+      ctx.fillText(label, cx, baseY);
+      if (isC4) {
+        ctx.font = '700 ' + Math.min(11, k.w * 0.34) + 'px -apple-system, sans-serif';
+        ctx.fillText('C4', cx, kbY + kbH - 6);
+      }
+    }
+  }
+  // 黒鍵
+  for (let m = layout.lo; m <= layout.hi; m++) {
+    if (isWhiteKey(m)) continue;
+    const k = layout.keyX.get(m);
+    if (!k) continue;
+    ctx.fillStyle = litKeys.has(m) ? litKeys.get(m) : '#161c22';
+    ctx.fillRect(k.x, kbY, k.w, kbH * 0.62);
+    ctx.strokeStyle = 'rgba(0,0,0,.5)';
+    ctx.strokeRect(k.x, kbY, k.w, kbH * 0.62);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// プレイ本体
+// ---------------------------------------------------------------------------
+let playCtx = null, playCanvas = null, layout = null, game = null, detector = null;
+let playRafId = null, lastFrameTime = 0, paused = false;
+let demoNextIdx = 0;
+
+function resizeCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+
+async function startPlay() {
+  if (!currentChart) return;
+  if (!demoMode && !analyser) {
+    const ok = await setupMic();
+    if (!ok) return;
+  }
+  playCanvas = els.playCanvas;
+  playCanvas.style.width = '100%';
+  playCanvas.style.height = '100%';
+  const range = currentChart.notes.reduce((acc, n) => ({ lo: Math.min(acc.lo, n.m), hi: Math.max(acc.hi, n.m) }),
+    { lo: 127, hi: 0 });
+  const kbRange = computeKeyboardRange(range.lo, range.hi, 2);
+
+  game = createGame(currentChart, {
+    hand: settings.hand, mode: settings.mode, offsetMs: settings.offsetMs, speed: Number(settings.speed),
+  });
+  detector = createOnsetDetector();
+  demoNextIdx = 0;
+  paused = false;
+  els.pauseMenu.classList.remove('show');
+  els.hudOffset.textContent = settings.offsetMs ? `補正${settings.offsetMs > 0 ? '+' : ''}${settings.offsetMs}ms` : '';
+
+  showScreen('screen-play');
+  const { w } = resizeCanvas(playCanvas);
+  layout = buildKeyLayout(kbRange.lo, kbRange.hi, w);
+  lastFrameTime = performance.now();
+  playRafId = requestAnimationFrame(playLoop);
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// 数字を等幅で詰めて中央揃え描画（「11」が「1　1」に見える問題対策）
+function drawTabularNumber(ctx, text, cx, y, font, color) {
+  ctx.save();
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const digitW = ctx.measureText('0').width;
+  const totalW = digitW * text.length;
+  let x = cx - totalW / 2;
+  for (const ch of text) {
+    ctx.fillText(ch, x + digitW / 2 - ctx.measureText(ch).width / 2, y);
+    x += digitW;
+  }
+  ctx.restore();
+}
+
+function handOf(n) { return n.h === 'L' ? 'L' : 'R'; }
+function noteColor(hand, dim) {
+  if (hand === 'L') return dim ? 'rgba(255,157,76,.35)' : '#ff9d4c';
+  return dim ? 'rgba(76,230,255,.35)' : '#4ce6ff';
+}
+
+function playLoop(now) {
+  if (paused) return;
+  const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+  lastFrameTime = now;
+  game.advance(dt);
+  const st = game.getState();
+
+  // --- 検出（実機マイク or デモ） ---
+  if (demoMode) {
+    runDemoAutoplay(st.clock);
+  } else if (analyser) {
+    const pending = game.getPendingMidis(0.3);
+    if (pending.size > 0) {
+      const spec = readSpectrumFromMic();
+      const evs = detector.step(st.clock, spec, [...pending], pending);
+      for (const ev of evs) game.onOnset(ev.midi, st.clock);
+    }
+  }
+
+  render(st);
+
+  if (game.isFinished()) { finishPlay(); return; }
+  playRafId = requestAnimationFrame(playLoop);
+}
+
+// デモ：譜面どおりの時刻にちょうど当てにいく自動演奏（画面確認用）
+function runDemoAutoplay(clock) {
+  const groups = game.groups;
+  while (demoNextIdx < groups.length && groups[demoNextIdx].t <= clock + 0.01) {
+    const g = groups[demoNextIdx];
+    for (const n of g.notes) game.onOnset(n.m, g.t);
+    demoNextIdx++;
+  }
+}
+
+function render(st) {
+  const { ctx, w, h } = resizeCanvas(playCanvas);
+  ctx.clearRect(0, 0, w, h);
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#0a1622');
+  grad.addColorStop(1, '#050b12');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  const kbH = Math.min(150, h * 0.28);
+  const kbY = h - kbH;
+  const judgeY = kbY - 4;
+  const leadSec = 1.8;
+  const fallTop = 40;
+  const pxPerSec = (judgeY - fallTop) / leadSec;
+
+  // 判定線（鍵盤のすぐ上に発光）
+  ctx.save();
+  ctx.shadowColor = 'rgba(150,220,255,.9)';
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = 'rgba(200,240,255,.95)';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, judgeY); ctx.lineTo(w, judgeY); ctx.stroke();
+  ctx.restore();
+
+  // ノーツ（音の長さ＝縦長バー）
+  const litKeys = new Map();
+  for (const n of currentChart.notes) {
+    const dur = Math.max(0.05, n.d || 0.15);
+    const dt = n.t - st.clock; // バー下端（発音時刻）までの秒数
+    if (dt > leadSec || dt + dur < -0.25) continue; // 完全に画面外
+    const k = layout.keyX.get(n.m);
+    if (!k) continue;
+    const yBottom = judgeY - dt * pxPerSec;
+    const yTop = judgeY - (dt + dur) * pxPerSec;
+    const drawBottom = Math.min(yBottom, judgeY + 20);
+    const drawTop = Math.max(yTop, fallTop);
+    if (drawBottom <= drawTop) continue;
+    const barW = (k.white ? k.w - 4 : k.w - 2);
+    const bx = k.x + (k.w - barW) / 2;
+    const isTarget = settings.hand === 'both' || handOf(n) === settings.hand;
+    const color = noteColor(handOf(n), !isTarget);
+    const radius = Math.min(barW / 2, 8, (drawBottom - drawTop) / 2);
+
+    ctx.beginPath();
+    roundRectPath(ctx, bx, drawTop, barW, drawBottom - drawTop, radius);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = isTarget ? 10 : 0;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    if (dt < 0.12 && dt > -0.12 && isTarget) litKeys.set(n.m, color);
+  }
+
+  drawKeyboard(ctx, layout, w, kbY, kbH, litKeys, true);
+
+  // コンボ（中央大きく・数字は等幅で詰める）
+  if (st.combo > 0) {
+    drawTabularNumber(ctx, String(st.combo), w / 2, h * 0.30, '700 64px -apple-system, sans-serif', 'rgba(190,240,255,.9)');
+    ctx.textAlign = 'center';
+    ctx.font = '400 14px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(190,240,255,.6)';
+    ctx.fillText('COMBO', w / 2, h * 0.30 + 22);
+  }
+
+  els.hudScore.textContent = 'SCORE ' + Math.round(st.score);
+  els.hudProgress.style.width = Math.min(100, (st.resolvedGroups / Math.max(1, st.totalGroups)) * 100) + '%';
+}
+
+els.pauseBtn.addEventListener('click', () => {
+  paused = true;
+  els.pauseMenu.classList.add('show');
+});
+els.resumeBtn.addEventListener('click', () => {
+  if (!paused) return;
+  paused = false;
+  els.pauseMenu.classList.remove('show');
+  lastFrameTime = performance.now();
+  playRafId = requestAnimationFrame(playLoop);
+});
+els.quitBtn.addEventListener('click', () => {
+  paused = true;
+  els.pauseMenu.classList.remove('show');
+  showScreen('screen-select');
+});
+
+function finishPlay() {
+  const st = game.getState();
+  showScreen('screen-result');
+  els.resultScore.textContent = Math.round(st.score);
+  els.resPerfect.textContent = st.counts.PERFECT;
+  els.resGood.textContent = st.counts.GOOD;
+  els.resMiss.textContent = st.counts.MISS;
+  els.resCombo.textContent = st.maxCombo;
+  const total = st.counts.PERFECT + st.counts.GOOD + st.counts.MISS;
+  const acc = total ? Math.round(((st.counts.PERFECT + st.counts.GOOD * 0.5) / total) * 100) : 0;
+  els.resAccuracy.textContent = acc + '%';
+}
+
+els.retryBtn.addEventListener('click', () => startPlay());
+els.toSelectBtn.addEventListener('click', () => showScreen('screen-select'));
+
+// ---------------------------------------------------------------------------
+// 自由演奏モード（鍵盤に今鳴っている音が光る）
+// ---------------------------------------------------------------------------
+els.freePlayBtn.addEventListener('click', async () => {
+  if (!analyser && !demoMode) { const ok = await setupMic(); if (!ok) return; }
+  showScreen('screen-free');
+  startFreeLoop();
+});
+els.freeBackBtn.addEventListener('click', () => {
+  if (freeLoopId) cancelAnimationFrame(freeLoopId);
+  showScreen('screen-mic');
+});
+
+function startFreeLoop() {
+  const canvas = els.freeCanvas;
+  const kbRange = { lo: 36, hi: 96 };
+  function loop() {
+    const { ctx, w, h } = resizeCanvas(canvas);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#050b12';
+    ctx.fillRect(0, 0, w, h);
+    const fLayout = buildKeyLayout(kbRange.lo, kbRange.hi, w);
+    const lit = new Map();
+    if (demoMode) {
+      const tSec = performance.now() / 1000;
+      const m = 60 + Math.floor(tSec) % 12;
+      lit.set(m, '#4ce6ff');
+    } else if (analyser) {
+      const spec = readSpectrumFromMic();
+      const top = detectFree(spec, { topN: 3, minDb: 10, minMidi: kbRange.lo, maxMidi: kbRange.hi });
+      for (const t of top) lit.set(t.midi, '#4ce6ff');
+    }
+    drawKeyboard(ctx, fLayout, w, h - 120, 120, lit);
+    if (document.getElementById('screen-free').classList.contains('active')) freeLoopId = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// ---------------------------------------------------------------------------
+// 画面スリープ防止
+// ---------------------------------------------------------------------------
+if ('wakeLock' in navigator) {
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      try { await navigator.wakeLock.request('screen'); } catch (e) { /* 無視 */ }
+    }
+  });
+  navigator.wakeLock.request('screen').catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// 起動
+// ---------------------------------------------------------------------------
+loadSongIndex().then(() => {
+  if (demoMode && songIndex.length > 0) {
+    const wantId = new URLSearchParams(location.search).get('song');
+    const meta = (wantId && songIndex.find((s) => s.id === wantId)) || songIndex[0];
+    selectSong(meta).then(() => {
+      setTimeout(async () => { await setupMic(); startPlay(); }, 300);
+    });
+  }
+});
+</script>
+</body>
+</html>

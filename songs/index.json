@@ -1,0 +1,40 @@
+{
+  "songs": [
+    {
+      "id": "fur_elise",
+      "title": "エリーゼのために",
+      "composer": "L. van Beethoven",
+      "noteCount": 154,
+      "duration": 28.75,
+      "range": [
+        40,
+        88
+      ],
+      "level": 4
+    },
+    {
+      "id": "kaeru",
+      "title": "かえるの合唱",
+      "composer": "ドイツ民謡",
+      "noteCount": 32,
+      "duration": 19.2,
+      "range": [
+        55,
+        69
+      ],
+      "level": 2
+    },
+    {
+      "id": "twinkle",
+      "title": "きらきら星",
+      "composer": "フランス民謡",
+      "noteCount": 48,
+      "duration": 31.333,
+      "range": [
+        48,
+        69
+      ],
+      "level": 2
+    }
+  ]
+}
